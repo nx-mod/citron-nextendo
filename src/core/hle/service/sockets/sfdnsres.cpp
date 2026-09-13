@@ -127,6 +127,15 @@ static std::optional<std::string> GetNextendoRedirectIp(const std::string& host)
         return server_ip;
     }
 
+    // [Nextendo] Diablo III (and any Demonware title) talks to Activision's Demonware, not
+    // Nintendo: crimson-switch-auth3/lobby.*.demonware.net for auth and the TCP 3074 lobby,
+    // stun.*.demonware.net for its NAT probes. Without this the emulator reaches the real
+    // Activision servers even with Nextendo on. Same set the console's hosts file sends local.
+    if (host == "demonware.net" || host.ends_with(".demonware.net")) {
+        LOG_INFO(Service, "[Nextendo] Redirecting Demonware host '{}' -> '{}'", host, server_ip);
+        return server_ip;
+    }
+
     return std::nullopt;
 }
 
