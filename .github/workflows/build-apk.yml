@@ -3,7 +3,7 @@ name: Build APK (nx-mod)
 on:
   workflow_dispatch:
   push:
-    branches: [diablo-3]
+    branches: [diablo-3, ldn_mitm]
 
 jobs:
   apk:
