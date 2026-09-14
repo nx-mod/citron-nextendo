@@ -7,6 +7,7 @@
 #include <chrono>
 #include <deque>
 #include <filesystem>
+#include <optional>
 #include <memory>
 #include <mutex>
 #include <thread>
@@ -2121,6 +2122,21 @@ std::pair<s32, Errno> BSD::RecvImpl(s32 fd, u32 flags, std::vector<u8>& message)
     return {ret, bsd_errno};
 }
 
+namespace {
+/// True if addr is this host's own IPv4 address. Cached, because it is consulted per received
+/// datagram and enumerating interfaces is not free.
+bool IsOwnAddress(const Network::SockAddrIn& addr) {
+    static std::optional<Network::IPv4Address> cached;
+    static std::chrono::steady_clock::time_point checked{};
+    const auto now = std::chrono::steady_clock::now();
+    if (now - checked > std::chrono::seconds(5)) {
+        checked = now;
+        cached = Network::GetHostIPv4Address();
+    }
+    return cached.has_value() && *cached == addr.ip;
+}
+} // Anonymous namespace
+
 std::pair<s32, Errno> BSD::RecvFromImpl(s32 fd, u32 flags, std::vector<u8>& message,
                                         std::vector<u8>& addr) {
     if (!IsFileDescriptorValid(fd)) {
@@ -2184,6 +2200,18 @@ std::pair<s32, Errno> BSD::RecvFromImpl(s32 fd, u32 flags, std::vector<u8>& mess
         for (int attempt = 0; attempt < 16 && IsTransientDatagramError(bsd_errno); ++attempt) {
             LOG_WARNING(Service, "Discarding queued ICMP error on fd={} errno={}", fd,
                         static_cast<int>(bsd_errno));
+            std::tie(ret, bsd_errno) =
+                Translate(descriptor.socket->RecvFrom(flags, message, p_addr_in));
+        }
+    }
+    // [ldn_mitm] Discard datagrams we sent ourselves. A UDP socket bound to 0.0.0.0 receives its
+    // own broadcasts back from the host stack; a console's LDN link never loops its frames back.
+    // Measured on a direct-LAN session: 825 broadcasts sent, 825 received back from our own
+    // address, which corrupts the session's view of its peers (rubber-banding, no error).
+    if (!descriptor.is_connection_based && p_addr_in != nullptr) {
+        for (int guard = 0; ret > 0 && guard < 64 && IsOwnAddress(*p_addr_in); guard++) {
+            LOG_DEBUG(Service, "RecvFrom fd={} dropping {} bytes echoed from our own address", fd,
+                      ret);
             std::tie(ret, bsd_errno) =
                 Translate(descriptor.socket->RecvFrom(flags, message, p_addr_in));
         }
@@ -2313,7 +2341,20 @@ std::pair<s32, Errno> BSD::SendToImpl(s32 fd, u32 flags, std::span<const u8> mes
                   message.size(), DescribePrudpLite(message));
     }
 
-    return Translate(file_descriptors[fd]->socket->SendTo(flags, message, p_addr_in));
+    const auto send_result =
+        Translate(file_descriptors[fd]->socket->SendTo(flags, message, p_addr_in));
+
+    // Log failed and short sends: Android sets the don't-fragment bit on UDP, so an oversized
+    // datagram fails with EMSGSIZE instead of fragmenting, and the game silently falls back.
+    if (send_result.first < 0) {
+        LOG_WARNING(Service, "SendTo fd={} FAILED for {} bytes, errno={}", fd, message.size(),
+                    static_cast<int>(send_result.second));
+    } else if (static_cast<size_t>(send_result.first) < message.size()) {
+        LOG_WARNING(Service, "SendTo fd={} short write: {} of {} bytes", fd, send_result.first,
+                    message.size());
+    }
+
+    return send_result;
 }
 
 Errno BSD::CloseImpl(s32 fd) {

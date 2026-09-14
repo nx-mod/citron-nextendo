@@ -840,6 +840,24 @@ Errno Socket::Initialize(Domain domain, Type type, Protocol protocol) {
         return GetAndLogLastError();
     }
 
+#if defined(__linux__) && defined(IP_MTU_DISCOVER) && defined(IP_PMTUDISC_DONT)
+    // Let oversized datagrams fragment instead of being rejected.
+    //
+    // Linux (and so Android) defaults UDP sockets to IP_PMTUDISC_WANT, which sets the
+    // don't-fragment bit: a datagram larger than the interface MTU fails with EMSGSIZE rather
+    // than being split. A guest cannot anticipate the host's MTU; on real hardware the
+    // console's stack simply fragments. In a captured MK8 LDN session the game's frames grew
+    // past 1500 bytes and its large snapshots then stopped for good, desyncing the peer.
+    if (type == Type::DGRAM) {
+        int mtu_discover = IP_PMTUDISC_DONT;
+        if (setsockopt(fd, IPPROTO_IP, IP_MTU_DISCOVER, &mtu_discover, sizeof(mtu_discover)) !=
+            0) {
+            LOG_WARNING(Network, "Could not disable path MTU discovery; oversized datagrams "
+                                 "will fail instead of fragmenting");
+        }
+    }
+#endif
+
     // Stay ahead of NAT/firewall idle-connection drops regardless of whether the game asked.
     if (type == Type::STREAM) {
         EnableAggressiveTcpKeepAlive(fd);
