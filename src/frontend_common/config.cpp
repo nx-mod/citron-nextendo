@@ -121,15 +121,10 @@ void Config::SetUpIni() {
     }
     fclose(fp);
 
-    // [Nextendo] nextendo_server_ip/nextendo_nat_ip/nextendo_pid used to live under
-    // Category::Services before being moved to Category::Network. No Setting<> has been
-    // tagged Category::Services since, so ReadCategory/SaveCategory(Services) is a no-op --
-    // but SimpleIni never clears a section it doesn't write to, so any config file written by
-    // an older build still carries the pre-migration [Services] copies around forever,
-    // reading as a confusing second "source of truth" that nothing actually consults anymore.
-    // Category::Network is the only place these are ever read from or written to; drop the
-    // stale section so the file on disk matches that. Idempotent: a no-op once already clean.
-    config->Delete(Settings::TranslateCategory(Settings::Category::Services), nullptr, true);
+    // [Nextendo] Do not drop the [Services] section here: ReadNetworkValues/SaveNetworkValues
+    // keep the Category::Network settings (nextendo_server_ip, nextendo_nat_ip, nextendo_pid,
+    // airplane_mode, ...) under [Services]. Deleting it on load reset them to defaults on every
+    // app start (Android; the Qt frontend overrides both under [Network]).
 }
 
 bool Config::IsCustomConfig() const {
