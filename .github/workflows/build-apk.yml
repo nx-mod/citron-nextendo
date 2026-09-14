@@ -1,0 +1,67 @@
+name: Build APK (nx-mod)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [diablo-3]
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    env:
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Full vcpkg history (its manifest baseline is an old commit)
+        run: git -C externals/vcpkg fetch --unshallow || git -C externals/vcpkg fetch origin
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: System packages
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ccache glslang-tools cmake ninja-build pkg-config zip nasm perl autoconf automake libtool yasm
+
+      - uses: actions/cache@v4
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: ccache-android-${{ github.sha }}
+          restore-keys: ccache-android-
+
+      - name: Android SDK and NDK
+        run: |
+          wget -q https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
+          unzip -q commandlinetools-linux-11076708_latest.zip
+          mkdir -p android-sdk/cmdline-tools && mv cmdline-tools android-sdk/cmdline-tools/latest
+          export ANDROID_HOME=$PWD/android-sdk
+          yes | android-sdk/cmdline-tools/latest/bin/sdkmanager --licenses > /dev/null || true
+          android-sdk/cmdline-tools/latest/bin/sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0" "ndk;26.1.10909125" "cmake;3.22.1" > /dev/null
+          echo "ANDROID_HOME=$ANDROID_HOME" >> $GITHUB_ENV
+          echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> $GITHUB_ENV
+          echo "ANDROID_NDK=$ANDROID_HOME/ndk/26.1.10909125" >> $GITHUB_ENV
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/26.1.10909125" >> $GITHUB_ENV
+
+      - name: Build
+        working-directory: src/android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleMainlineRelease --no-daemon \
+            -Pcmake.args="-DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache -DENABLE_QT=OFF -DENABLE_SDL2=OFF -DENABLE_WEB_SERVICE=OFF -DENABLE_OPENSSL=OFF -DCITRON_USE_BUNDLED_VCPKG=ON -DCITRON_USE_BUNDLED_FFMPEG=ON -DCITRON_ENABLE_LTO=OFF -DCITRON_BUILD_TYPE=Release"
+
+      - name: vcpkg logs (on failure)
+        if: failure()
+        run: |
+          find src/android/app/.cxx -name 'vcpkg-manifest-install.log' -exec tail -n 60 {} \; || true
+          find externals/vcpkg/buildtrees -name '*-err.log' -exec sh -c 'echo "== $1"; tail -n 40 "$1"' _ {} \; 2>/dev/null | tail -n 200 || true
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: citron-android
+          path: src/android/app/build/outputs/apk/mainline/release/*.apk
