@@ -114,6 +114,17 @@ SPDX-License-Identifier: GPL-3.0-or-later
             android:exported="false"
             android:foregroundServiceType="dataSync" />
 
+        <service android:name="org.citron.citron_emu.utils.LdnVpnService"
+                 android:permission="android.permission.BIND_VPN_SERVICE"
+                 android:foregroundServiceType="specialUse"
+                 android:exported="false">
+            <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                      android:value="LDN local-play virtual network"/>
+            <intent-filter>
+                <action android:name="android.net.VpnService" />
+            </intent-filter>
+        </service>
+
     </application>
 
 </manifest>

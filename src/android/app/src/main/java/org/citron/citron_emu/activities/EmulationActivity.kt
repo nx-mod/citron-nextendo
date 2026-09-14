@@ -54,6 +54,7 @@ import org.citron.citron_emu.model.Game
 import org.citron.citron_emu.utils.AmiiboFileSession
 import org.citron.citron_emu.utils.DisplayModeUtil
 import org.citron.citron_emu.utils.InputHandler
+import org.citron.citron_emu.utils.LdnVpnService
 import org.citron.citron_emu.utils.Log
 import org.citron.citron_emu.utils.MemoryUtil
 import org.citron.citron_emu.utils.NativeConfig
@@ -195,6 +196,14 @@ class EmulationActivity : AppCompatActivity(), SensorEventListener {
         super.onPause()
         nfcReader.stopScanning()
         stopMotionSensorListener()
+    }
+
+    override fun onDestroy() {
+        // Tear the LDN tunnel down with the game. Left running it keeps a foreground
+        // notification and a reconnect loop alive after the game exits.
+        processHasEmulationSession = false
+        LdnVpnService.stop(this)
+        super.onDestroy()
     }
 
     override fun onUserLeaveHint() {
@@ -524,6 +533,12 @@ class EmulationActivity : AppCompatActivity(), SensorEventListener {
 
     fun onEmulationStarted() {
         emulationViewModel.setEmulationStarted(true)
+        processHasEmulationSession = true
+        // Bring up the LDN tunnel only when ldn_network.ini names a bridge; otherwise Android's
+        // VPN consent dialog would appear on every launch for players who never use LDN.
+        if (LdnVpnService.isConfigured()) {
+            LdnVpnService.prepareAndStart(this)
+        }
     }
 
     fun onEmulationStopped(status: Int) {
@@ -571,6 +586,15 @@ class EmulationActivity : AppCompatActivity(), SensorEventListener {
 
     companion object {
         const val EXTRA_SELECTED_GAME = "SelectedGame"
+
+        @Volatile
+        private var processHasEmulationSession = false
+
+        /**
+         * Whether a game is running in this process. LdnVpnService uses it to decide whether
+         * to revive its tunnel after the system restarts the START_STICKY service.
+         */
+        fun isEmulationSessionActive(): Boolean = processHasEmulationSession
         private val MIN_PICTURE_IN_PICTURE_ASPECT_RATIO = Rational(100, 239)
         private val MAX_PICTURE_IN_PICTURE_ASPECT_RATIO = Rational(239, 100)
 
