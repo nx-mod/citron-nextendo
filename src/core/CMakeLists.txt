@@ -762,6 +762,8 @@ add_library(core STATIC
     hle/service/ldn/client_process_monitor.h
     hle/service/ldn/lan_discovery.cpp
     hle/service/ldn/lan_discovery.h
+    hle/service/ldn/lan_protocol.cpp
+    hle/service/ldn/lan_protocol.h
     hle/service/ldn/ldn.cpp
     hle/service/ldn/ldn.h
     hle/service/ldn/ldn_results.h

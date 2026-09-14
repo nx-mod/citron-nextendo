@@ -110,11 +110,23 @@ Result IUserLocalCommunicationService::GetIpv4Address(Out<Ipv4Address> out_curre
     *out_current_address = {Network::TranslateIPv4(network_interface->ip_address)};
     *out_subnet_mask = {Network::TranslateIPv4(network_interface->subnet_mask)};
 
-    // When we're connected to a room, spoof the hosts IP address
-    if (auto room_member = room_network.GetRoomMember().lock()) {
-        if (room_member->IsConnected()) {
-            *out_current_address = room_member->GetFakeIpAddress();
-        }
+    // The game uses this to decide who it can reach on the LDN network, so it
+    // has to match the address our peers actually address us by -- not the
+    // phone's real interface. With the native transport a peer knows us by
+    // whatever the PC-side bridge advertised on our behalf (10.13.x.y on the
+    // lan-play virtual LAN), and the phone's real address is on an unrelated
+    // subnet with a narrower mask. Reporting the real one makes the game treat
+    // every peer as off-subnet: it joins successfully, fails to establish the
+    // data path, and drops the session a second later with a communication
+    // error. Falls through to the real interface when virtual_ip is unset.
+    Network::IPv4Address virtual_address{};
+    Network::IPv4Address virtual_mask{};
+    if (lan_discovery.GetVirtualIpConfig(virtual_address, virtual_mask)) {
+        *out_current_address = virtual_address;
+        *out_subnet_mask = virtual_mask;
+        LOG_INFO(Service_LDN, "reporting virtual address {}.{}.{}.{} mask {}.{}.{}.{}",
+                 virtual_address[0], virtual_address[1], virtual_address[2], virtual_address[3],
+                 virtual_mask[0], virtual_mask[1], virtual_mask[2], virtual_mask[3]);
     }
 
     std::reverse(std::begin(*out_current_address), std::end(*out_current_address)); // ntohl
